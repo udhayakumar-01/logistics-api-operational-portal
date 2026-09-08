@@ -1,0 +1,4 @@
+tier,requests_per_minute,burst_per_second,concurrent_connections
+Standard,100,20,5
+Premium,500,50,25
+Enterprise,2000,200,100

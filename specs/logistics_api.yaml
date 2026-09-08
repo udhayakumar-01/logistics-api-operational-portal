@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: Logistics Marketplace Operational API
+  description: >
+    Operational API documentation for the Logistics Marketplace.
+    Integrates Sellers, Carriers, Warehouses, and Partner API Consumers.
+    Includes rate limits, idempotency event handling, error definitions, and operational limits.
+  version: 1.0.0
+  contact:
+    name: Logistics API Operational Engineering
+    email: api-ops@logistics-marketplace.internal
+servers:
+  - url: http://localhost:8000
+    description: Local Development & Operational Simulation Server
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /api/v1/health:
+    get:
+      summary: Operational Health Check
+      description: Returns operational status, system load, database connectivity, and data freshness metrics.
+      security: []
+      responses:
+        '200':
+          description: System operational
+          content:
+            application/json:
+              example:
+                status: healthy
+                timestamp: "2026-09-08T09:45:00Z"
+                database: connected
+                data_freshness: FRESH
+                uptime_seconds: 86400
+
+  /api/v1/limits:
+    get:
+      summary: Get Operational & Rate Limits
+      description: Returns client tier rate limits, burst thresholds, payload size boundaries, and active quotas.
+      responses:
+        '200':
+          description: Operational limits metadata
+          headers:
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+              description: Request count limit per window
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+              description: Remaining allowed requests
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+              description: UTC epoch timestamp when limit resets
+          content:
+            application/json:
+              example:
+                tier: Standard
+                requests_per_minute: 100
+                burst_requests_per_second: 20
+                max_payload_bytes: 1048576
+                retry_strategy: Exponential Backoff with Jitter
+
+  /api/v1/shipments:
+    post:
+      summary: Create New Shipment
+      description: Creates a new shipment order. Rejects invalid seller, warehouse, or carrier combinations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShipmentCreateRequest'
+            example:
+              seller_id: "SELLER-001"
+              warehouse_id: "WH-001"
+              carrier_id: "CAR-001"
+              destination: "Chennai, TN, India"
+              origin: "Bengaluru, KA, India"
+              items:
+                - sku: "SKU-1001"
+                  quantity: 2
+      responses:
+        '201':
+          description: Shipment created successfully
+          content:
+            application/json:
+              example:
+                shipment_id: "SHP-5001"
+                status: "CREATED"
+                seller_id: "SELLER-001"
+                warehouse_id: "WH-001"
+                carrier_id: "CAR-001"
+                origin: "Bengaluru, KA, India"
+                destination: "Chennai, TN, India"
+                sequence_number: 1
+                created_at: "2026-09-08T09:45:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /api/v1/shipments/{shipment_id}:
+    get:
+      summary: Get Shipment Details
+      description: Fetches full shipment details, current state machine status, event count, and evidence metrics.
+      parameters:
+        - name: shipment_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "SHP-0001"
+      responses:
+        '200':
+          description: Shipment details retrieved
+          content:
+            application/json:
+              example:
+                shipment_id: "SHP-0001"
+                status: "IN_TRANSIT"
+                seller_id: "SELLER-012"
+                warehouse_id: "WH-005"
+                carrier_id: "CAR-003"
+                origin: "Mumbai"
+                destination: "Delhi"
+                current_sequence: 3
+                event_count: 4
+                duplicate_event_count: 1
+                out_of_order_event_count: 1
+                delayed_event_count: 0
+                last_updated: "2026-09-08T09:30:00Z"
+                freshness: "FRESH"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/shipments/{shipment_id}/status:
+    patch:
+      summary: Update Shipment Status (Direct State Transition)
+      description: Updates status directly following valid state transition rules (CREATED -> PICKED_UP -> IN_TRANSIT -> OUT_FOR_DELIVERY -> DELIVERED).
+      parameters:
+        - name: shipment_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [CREATED, PICKED_UP, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, CANCELLED]
+            example:
+              status: "PICKED_UP"
+      responses:
+        '200':
+          description: Status updated successfully
+        '400':
+          description: Invalid state transition requested
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/carriers:
+    get:
+      summary: List Carriers
+      description: Returns active carriers, operational capacity, and recent event processing status.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of carriers
+
+  /api/v1/warehouses:
+    get:
+      summary: List Warehouses
+      description: Returns warehouse operational statuses, fulfillment capacity, and data freshness.
+      responses:
+        '200':
+          description: List of warehouses
+
+  /api/v1/inventory/{sku}:
+    get:
+      summary: Check Inventory by SKU
+      description: Retrieves real-time stock counts across warehouses for a specific SKU.
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "SKU-1001"
+      responses:
+        '200':
+          description: Inventory detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/events:
+    post:
+      summary: Ingest Logistics Event
+      description: >
+        Primary endpoint for state machine events (SHIPMENT_CREATED, PICKED_UP, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED).
+        Safely processes duplicate, out-of-order, and delayed events using idempotency key (`event_id`) and sequence numbers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventIngestRequest'
+            example:
+              event_id: "EVT-9901"
+              event_type: "PICKED_UP"
+              entity_id: "SHP-0001"
+              timestamp: "2026-09-08T09:40:00Z"
+              source: "CARRIER-APP"
+              sequence_number: 2
+              payload:
+                location: "Hub 4, Bengaluru"
+      responses:
+        '200':
+          description: Event processed
+          content:
+            application/json:
+              example:
+                event_id: "EVT-9901"
+                status: "PROCESSED"
+                decision: "STATE_MUTATED"
+                reason: "Valid state transition to PICKED_UP"
+                current_state: "PICKED_UP"
+                is_duplicate: false
+                is_out_of_order: false
+                is_delayed: false
+        '202':
+          description: Event accepted but ignored for state mutation (e.g. duplicate or out-of-order)
+          content:
+            application/json:
+              example:
+                event_id: "EVT-9901"
+                status: "ACCEPTED_NO_MUTATION"
+                decision: "IGNORED"
+                reason: "Sequence number (2) older or equal to current state sequence (3)"
+                current_state: "IN_TRANSIT"
+                is_duplicate: true
+
+  /api/v1/events/{event_id}:
+    get:
+      summary: Get Event Details
+      description: Retrieves event ingestion metadata, received_at timestamp, payload, and processing decision.
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event details
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/evidence/{entity_id}:
+    get:
+      summary: Get Evidence & Event Trace for Entity
+      description: Provides full operational evidence for a shipment, including duplicate count, out-of-order count, delayed count, and sequence audit trail.
+      parameters:
+        - name: entity_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "SHP-0001"
+      responses:
+        '200':
+          description: Operational evidence report
+
+  /api/v1/errors:
+    get:
+      summary: Get Observed API Errors Log
+      description: Returns error telemetry aggregated across all endpoints, categorized by error code.
+      responses:
+        '200':
+          description: API error log list
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API Key authentication. Use `demo-api-key-seller-001` or `demo-api-key-partner-admin`.
+
+  schemas:
+    ShipmentCreateRequest:
+      type: object
+      required:
+        - seller_id
+        - warehouse_id
+        - carrier_id
+        - destination
+        - items
+      properties:
+        seller_id:
+          type: string
+        warehouse_id:
+          type: string
+        carrier_id:
+          type: string
+        origin:
+          type: string
+        destination:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - sku
+              - quantity
+            properties:
+              sku:
+                type: string
+              quantity:
+                type: integer
+                minimum: 1
+
+    EventIngestRequest:
+      type: object
+      required:
+        - event_id
+        - event_type
+        - entity_id
+        - timestamp
+        - source
+        - sequence_number
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          enum: [SHIPMENT_CREATED, PICKED_UP, ARRIVED_WAREHOUSE, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, CANCELLED]
+        entity_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+        sequence_number:
+          type: integer
+        payload:
+          type: object
+
+    ErrorResponse:
+      type: object
+      required:
+        - error_code
+        - message
+        - timestamp
+        - actionable_advice
+      properties:
+        error_code:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+        actionable_advice:
+          type: string
+        documentation_url:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad Request / Invalid Parameter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: "INVALID_PARAMETER"
+            message: "Warehouse WH-9999 does not exist or is inactive."
+            timestamp: "2026-09-08T09:45:00Z"
+            actionable_advice: "Verify warehouse ID against GET /api/v1/warehouses before creating shipment."
+
+    Unauthorized:
+      description: Authentication failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: "MISSING_API_KEY"
+            message: "X-API-Key header is missing or invalid."
+            timestamp: "2026-09-08T09:45:00Z"
+            actionable_advice: "Include a valid X-API-Key header in your request."
+
+    ValidationError:
+      description: Request payload validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: "VALIDATION_ERROR"
+            message: "Field 'quantity' must be greater than 0."
+            timestamp: "2026-09-08T09:45:00Z"
+            actionable_advice: "Check item payload structure against schema requirements."
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: "RESOURCE_NOT_FOUND"
+            message: "Shipment SHP-9999 was not found."
+            timestamp: "2026-09-08T09:45:00Z"
+            actionable_advice: "Ensure the shipment_id is correct and exists."
+
+    RateLimitExceeded:
+      description: Rate limit exceeded (HTTP 429)
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: "RATE_LIMIT_EXCEEDED"
+            message: "Rate limit exceeded (100 req/min). Remaining quota: 0."
+            timestamp: "2026-09-08T09:45:00Z"
+            actionable_advice: "Wait for Retry-After seconds before sending subsequent requests. Implement exponential backoff."
