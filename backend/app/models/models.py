@@ -22,7 +22,7 @@ class Warehouse(Base):
     city = Column(String(50), nullable=False)
     capacity = Column(Integer, default=10000)
     current_occupancy = Column(Integer, default=5000)
-    freshness_status = Column(String(20), default="FRESH")
+    freshness_status = Column(String(20), default="FRESH", index=True)
     last_updated = Column(String(50))
 
 class Carrier(Base):
@@ -32,7 +32,7 @@ class Carrier(Base):
     name = Column(String(100), nullable=False)
     contact_number = Column(String(50))
     active_vehicles = Column(Integer, default=50)
-    freshness_status = Column(String(20), default="FRESH")
+    freshness_status = Column(String(20), default="FRESH", index=True)
     last_updated = Column(String(50))
 
 class Inventory(Base):
@@ -43,7 +43,7 @@ class Inventory(Base):
     warehouse_id = Column(String(50), ForeignKey("warehouses.warehouse_id"), index=True)
     quantity = Column(Integer, default=100)
     reorder_level = Column(Integer, default=20)
-    freshness_status = Column(String(20), default="FRESH")
+    freshness_status = Column(String(20), default="FRESH", index=True)
     last_updated = Column(String(50))
 
 class Shipment(Base):
@@ -60,7 +60,7 @@ class Shipment(Base):
     duplicate_event_count = Column(Integer, default=0)
     out_of_order_event_count = Column(Integer, default=0)
     delayed_event_count = Column(Integer, default=0)
-    freshness_status = Column(String(20), default="FRESH")
+    freshness_status = Column(String(20), default="FRESH", index=True)
     created_at = Column(String(50))
     last_updated = Column(String(50))
 
@@ -71,14 +71,14 @@ class ShipmentEvent(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(String(100), index=True)
-    event_type = Column(String(50), nullable=False)
+    event_type = Column(String(50), nullable=False, index=True)
     entity_id = Column(String(50), ForeignKey("shipments.shipment_id"), index=True)
     timestamp = Column(String(50), nullable=False)
     received_at = Column(String(50), nullable=False)
     source = Column(String(50))
     sequence_number = Column(Integer, nullable=False)
     payload = Column(Text)
-    status = Column(String(30), default="PROCESSED")
+    status = Column(String(30), default="PROCESSED", index=True)
     decision = Column(String(50), default="STATE_MUTATED")
     reason = Column(Text)
 

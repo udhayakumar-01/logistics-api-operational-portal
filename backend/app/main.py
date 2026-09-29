@@ -10,7 +10,7 @@ from app.database import engine, Base, SessionLocal
 from app.seed import seed_database_from_csv
 from app.services.rate_limiter import rate_limiter
 from app.routes import (
-    shipments, carriers, warehouses, inventory, events, health, limits, errors, evidence, simulator, dashboard, experiments, validation, risks
+    shipments, carriers, warehouses, inventory, events, health, limits, errors, evidence, simulator, dashboard, experiments, validation, risks, freshness
 )
 
 app = FastAPI(
@@ -44,8 +44,8 @@ def read_root():
 # Rate Limiting Middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    # Exempt static docs, root portal, openapi, health, and options calls from strict rate limits
-    if request.url.path in ["/", "/docs", "/redoc", "/openapi.json", "/api/v1/health"] or request.method == "OPTIONS":
+    # Exempt static docs, root portal, openapi, health, and simulator controls from strict rate limits
+    if request.url.path in ["/", "/docs", "/redoc", "/openapi.json", "/api/v1/health", "/api/v1/simulator/trigger-limit", "/api/v1/simulator/reset-demo"] or request.method == "OPTIONS":
         return await call_next(request)
 
     api_key = request.headers.get("X-API-Key") or request.client.host or "anonymous"
@@ -109,6 +109,7 @@ app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(experiments.router, prefix=settings.API_V1_STR)
 app.include_router(validation.router, prefix=settings.API_V1_STR)
 app.include_router(risks.router, prefix=settings.API_V1_STR)
+app.include_router(freshness.router, prefix=settings.API_V1_STR)
 
 @app.on_event("startup")
 def on_startup():

@@ -92,6 +92,63 @@ def create_shipment(
         "created_at": shipment.created_at
     }
 
+@router.get("", summary="List Shipments with Search and Filtering")
+def list_shipments(
+    search: str = None,
+    status: str = None,
+    seller_id: str = None,
+    carrier_id: str = None,
+    warehouse_id: str = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
+):
+    query = db.query(Shipment)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            (Shipment.shipment_id.like(search_pattern)) |
+            (Shipment.origin.like(search_pattern)) |
+            (Shipment.destination.like(search_pattern))
+        )
+    if status:
+        query = query.filter(Shipment.status == status.upper())
+    if seller_id:
+        query = query.filter(Shipment.seller_id == seller_id)
+    if carrier_id:
+        query = query.filter(Shipment.carrier_id == carrier_id)
+    if warehouse_id:
+        query = query.filter(Shipment.warehouse_id == warehouse_id)
+
+    total = query.count()
+    shipments = query.offset(offset).limit(limit).all()
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [
+            {
+                "shipment_id": s.shipment_id,
+                "seller_id": s.seller_id,
+                "warehouse_id": s.warehouse_id,
+                "carrier_id": s.carrier_id,
+                "origin": s.origin,
+                "destination": s.destination,
+                "status": s.status,
+                "current_sequence": s.current_sequence,
+                "duplicate_event_count": s.duplicate_event_count,
+                "out_of_order_event_count": s.out_of_order_event_count,
+                "delayed_event_count": s.delayed_event_count,
+                "freshness_status": s.freshness_status or "FRESH",
+                "created_at": s.created_at,
+                "last_updated": s.last_updated
+            }
+            for s in shipments
+        ]
+    }
+
 @router.get("/{shipment_id}")
 def get_shipment(
     shipment_id: str,
@@ -125,7 +182,7 @@ def get_shipment(
         "duplicate_event_count": shipment.duplicate_event_count,
         "out_of_order_event_count": shipment.out_of_order_event_count,
         "delayed_event_count": shipment.delayed_event_count,
-        "freshness_status": shipment.freshness_status,
+        "freshness_status": shipment.freshness_status or "FRESH",
         "created_at": shipment.created_at,
         "last_updated": shipment.last_updated
     }
